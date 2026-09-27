@@ -296,6 +296,21 @@ describe("SubagentScheduler — fire path", () => {
     );
   });
 
+  it("refuses an unavailable scheduled model instead of silently inheriting", () => {
+    const job = scheduler.addJob({
+      name: "unavailable", description: "missing provider", schedule: "+1s",
+      subagent_type: "general-purpose", prompt: "run", model: "openai-codex/gpt-5.3-codex",
+    });
+
+    vi.advanceTimersByTime(2_000);
+
+    expect(manager.spawn).not.toHaveBeenCalled();
+    expect(store.get(job.id)?.lastStatus).toBe("error");
+    expect(pi.events.emit).toHaveBeenCalledWith("subagents:scheduled", expect.objectContaining({
+      type: "error", jobId: job.id, error: expect.stringContaining("Model not found"),
+    }));
+  });
+
   it("one-shot fires once and auto-disables", async () => {
     const job = scheduler.addJob({
       name: "soon", description: "once", schedule: "+1s",

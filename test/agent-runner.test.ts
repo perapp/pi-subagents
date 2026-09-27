@@ -2700,6 +2700,12 @@ describe("resolveDefaultModel", () => {
       .toEqual({ provider: "anthropic", id: "claude-haiku-4-5" });
   });
 
+  it("inherits the parent when a configured model is on another provider", () => {
+    const r = registry([{ provider: "openai", id: "gpt-5" }]);
+    expect(resolveDefaultModel(parent, r, "openai/gpt-5")).toBe(parent);
+    expect(r.find).not.toHaveBeenCalled();
+  });
+
   it("falls back to the parent when the model is NOT in the available set", () => {
     // The branch with teeth: without this filter the subagent is handed a model
     // the user has no credentials for, and the failure surfaces as a runtime

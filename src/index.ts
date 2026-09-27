@@ -1627,7 +1627,7 @@ Terse command-style prompts produce shallow, generic work.
       model: Type.Optional(
         Type.String({
           description:
-            'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+            'Optional model override. Accepts "provider/modelId" (never falls back to another provider) or a fuzzy name (e.g. "haiku", "sonnet"). Overrides the agent type\'s default; omit to use a compatible default or inherit the parent model.',
         }),
       ),
       thinking: Type.Optional(
@@ -1826,10 +1826,13 @@ Terse command-style prompts produce shallow, generic work.
         defaultRunInBackground: getBackgroundByDefault(),
       });
 
-      // Resolve model from agent config first; tool-call params only fill gaps.
+      // Caller model wins; a file default may only select the parent's provider.
       let model = ctx.model;
       if (resolvedConfig.modelInput) {
-        const resolved = resolveModel(resolvedConfig.modelInput, ctx.modelRegistry);
+        const resolved = resolveModel(
+          resolvedConfig.modelInput, ctx.modelRegistry,
+          resolvedConfig.modelFromParams ? undefined : ctx.model?.provider,
+        );
         if (typeof resolved === "string") {
           if (resolvedConfig.modelFromParams) return textResult(resolved);
           // config-specified: silent fallback to parent
@@ -1875,26 +1878,13 @@ Terse command-style prompts produce shallow, generic work.
       // This is the pre-session snapshot — agent-manager overwrites it with the
       // effective values the moment a session reports them.
       const { modelName, modelId } = model ? describeModel(model) : { modelName: undefined, modelId: undefined };
-      // What the caller SPELLED, kept only if it names a different model than the
-      // one that won. Model input is fuzzy — `"haiku"` and
-      // `"anthropic/claude-haiku-4-5"` are the same model — so comparing the two
-      // strings would disclose an override that never happened. A spelling that
-      // resolves to nothing is still worth disclosing: it cannot have taken effect.
-      const askedModel = ((asked: string | undefined) => {
-        if (!asked) return undefined;
-        const resolvedAsked = resolveModel(asked, ctx.modelRegistry);
-        if (typeof resolvedAsked === "string") return asked;
-        return resolvedAsked.provider === model?.provider && resolvedAsked.id === model?.id ? undefined : asked;
-      })(resolvedConfig.overridden?.model);
       const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
       const agentInvocation: AgentInvocation = {
         modelName,
         modelId,
         thinking,
-        // Only set where the agent file outranked the caller, so the surfaces can
-        // disclose a parameter that was accepted but could not take effect (#182).
+        // Thinking can still be pinned by an agent file over the caller's request.
         requestedThinking: resolvedConfig.overridden?.thinking,
-        requestedModel: askedModel,
         // Explicit value only — the default fallback would just add noise.
         // Normalize so `0` (unlimited) doesn't surface as a misleading "max turns: 0".
         maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
@@ -2898,18 +2888,15 @@ Terse command-style prompts produce shallow, generic work.
   // so they are reachable from tests — this command handler is only registered
   // through `registerCommand`, which every test mocks.
 
-  function getModelLabel(type: string, registry?: ModelRegistry): string {
+  function getModelLabel(type: string, registry?: ModelRegistry, parentProvider?: string): string {
     const cfg = getAgentConfig(type);
-    if (!cfg?.model) return "inherit"; // no model configured → really inherits parent
+    if (!cfg?.model) return "inherit";
     const label = getModelLabelFromConfig(cfg.model);
     if (!registry) return label;
-    const resolved = resolveModel(cfg.model, registry);
-    // Configured but unresolvable: the runtime silently falls back to the parent
-    // model, so flag it (and the fallback) rather than hiding the config.
-    if (typeof resolved === "string") return `${label} (unavailable, fallback: inherit)`;
-    // Surface what it actually resolved to when that differs from the config —
-    // e.g. a provider fallback or a looser version pin. Cosmetic separator/date
-    // differences are normalized away so an effectively-identical match stays quiet.
+    const resolved = resolveModel(cfg.model, registry, parentProvider);
+    if (typeof resolved === "string") return `${label} (unavailable or other provider, fallback: inherit)`;
+    // Surface a looser version pin; cosmetic separator/date differences are
+    // normalized away so an effectively-identical match stays quiet.
     const resolvedFull = `${resolved.provider}/${resolved.id}`;
     const norm = (s: string) => s.toLowerCase().replace(/\./g, "-").replace(/-\d{8}$/, "");
     if (norm(cfg.model) === norm(resolvedFull)) return label;
@@ -3008,7 +2995,7 @@ Terse command-style prompts produce shallow, generic work.
     const items: SettingItem[] = allNames.map(name => {
       const cfg = getAgentConfig(name);
       const disabled = cfg?.enabled === false;
-      const model = getModelLabel(name, ctx.modelRegistry);
+      const model = getModelLabel(name, ctx.modelRegistry, ctx.model?.provider);
       return {
         id: name,
         label: `${sourceIndicator(cfg)}${name}`,

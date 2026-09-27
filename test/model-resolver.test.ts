@@ -125,20 +125,26 @@ describe("resolveModel", () => {
     });
   });
 
-  describe("provider fallback (prefer named provider, else any)", () => {
+  describe("provider-qualified selection", () => {
     const gatewayHaiku = { id: "claude-haiku-4-5", name: "Claude Haiku", provider: "openrouter" };
     const anthropicHaiku = { id: "claude-haiku-4-5", name: "Claude Haiku", provider: "anthropic" };
 
-    it("falls back to another provider when the named one lacks the model", () => {
-      expect(resolveModel("anthropic/claude-haiku-4-5", makeRegistry([gatewayHaiku]))).toEqual(gatewayHaiku);
+    it("refuses another provider when the requested one has no auth or model", () => {
+      const result = resolveModel("anthropic/claude-haiku-4-5", makeRegistry([gatewayHaiku]));
+      expect(result).toContain('Model not found: "anthropic/claude-haiku-4-5"');
     });
 
-    it("prefers the named provider when it has the model", () => {
+    it("prefers the named provider when both have the model", () => {
       expect(resolveModel("anthropic/claude-haiku-4-5", makeRegistry([gatewayHaiku, anthropicHaiku]))).toEqual(anthropicHaiku);
     });
 
-    it("still errors when no provider has the model", () => {
-      expect(typeof resolveModel("anthropic/nonexistent-xyz", makeRegistry([gatewayHaiku]))).toBe("string");
+    it("restricts a frontmatter default to the parent provider", () => {
+      expect(typeof resolveModel("anthropic/claude-haiku-4-5", makeRegistry([anthropicHaiku]), "openrouter")).toBe("string");
+      expect(resolveModel("claude-haiku", makeRegistry([gatewayHaiku, anthropicHaiku]), "openrouter")).toEqual(gatewayHaiku);
+    });
+
+    it("still allows a bare model name to choose any available provider", () => {
+      expect(resolveModel("claude-haiku-4-5", makeRegistry([gatewayHaiku]))).toEqual(gatewayHaiku);
     });
   });
 

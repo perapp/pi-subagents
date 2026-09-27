@@ -230,7 +230,10 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
       });
       let model = ctx.model;
       if (invocation.modelInput) {
-        const resolvedModel = resolveModel(invocation.modelInput, ctx.modelRegistry);
+        const resolvedModel = resolveModel(
+          invocation.modelInput, ctx.modelRegistry,
+          invocation.modelFromParams ? undefined : ctx.model?.provider,
+        );
         if (typeof resolvedModel === "string") {
           if (invocation.modelFromParams) return textResult(resolvedModel, true);
         } else {

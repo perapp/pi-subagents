@@ -358,8 +358,9 @@ export function getGraceTurns(): number { return graceTurns; }
 export function setGraceTurns(n: number): void { graceTurns = Math.max(1, n); }
 
 /**
- * Try to find the right model for an agent type.
- * Priority: explicit option > config.model > parent model.
+ * Try a same-provider model preference from an agent definition.
+ * An explicit option is handled by the caller; an incompatible preference
+ * inherits the parent instead of silently switching providers.
  */
 export function resolveDefaultModel(
   parentModel: Model<any> | undefined,
@@ -371,6 +372,7 @@ export function resolveDefaultModel(
     if (slashIdx !== -1) {
       const provider = configModel.slice(0, slashIdx);
       const modelId = configModel.slice(slashIdx + 1);
+      if (parentModel && provider.toLowerCase() !== parentModel.provider.toLowerCase()) return parentModel;
 
       // Build a set of available model keys for fast lookup
       const available = registry.getAvailable?.();
@@ -828,7 +830,7 @@ export async function runAgent(
     }
   }
 
-  // Resolve model: explicit option > config.model > parent model
+  // Resolve model: explicit option > compatible config preference > parent model
   const model = options.model ?? resolveDefaultModel(
     ctx.model, ctx.modelRegistry, agentConfig?.model,
   );
