@@ -7,11 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-> **⚠️ Breaking: agent-file `model:` is now a same-provider default, not a lock.** An explicit `Agent({ model })` overrides it; a file default on another provider inherits the parent model. Provider-qualified model requests now fail instead of falling back across providers. To deliberately use a different provider, specify its qualified model on the call.
-
-### Changed
-- **Subagents keep the parent provider unless the caller explicitly chooses otherwise.** Built-in Explore inherits the parent model, and file defaults on another provider no longer trigger authentication on a machine that lacks that provider. Qualified model requests fail closed when unavailable, while bare fuzzy names remain cross-provider choices.
-
 ### Fixed
 - **The workflow stand-down now recognises a lowercase `workflow` tool** ([#283](https://github.com/tintinweb/pi-subagents/issues/283) — thanks [@zampierilucas](https://github.com/zampierilucas)). The match is exact on purpose, and the set held `Workflow` and `SubagentWorkflow` only, so `@quintinshaw/pi-dynamic-workflows` — which registers lowercase `workflow` — never tripped it: with `workflowsEnabled` unset, both orchestrators reached the model and nothing warned. Adding the third name is the whole fix; exactness is kept, so a `list_workflows` still cannot take the feature down.
 
