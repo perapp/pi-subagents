@@ -1,5 +1,6 @@
 /**
- * Model resolution: exact match ("provider/modelId") with fuzzy fallback.
+ * Model resolution: provider-qualified queries stay within their provider;
+ * unqualified queries can be fuzzy across available models.
  */
 
 export interface ModelEntry {
@@ -34,24 +35,30 @@ export function describeModel(
 
 /**
  * Resolve a model string to a Model instance.
- * Tries exact match first ("provider/modelId"), then fuzzy match against all available models.
+ * Tries exact match first, then fuzzy match within the named provider (if any).
+ * `provider` also restricts unqualified agent-file defaults to the parent's provider.
  * Returns the Model on success, or an error message string on failure.
  */
 export function resolveModel(
   input: string,
   registry: ModelRegistry,
+  provider?: string,
 ): any | string {
   // Available models (those with auth configured)
-  const all = (registry.getAvailable?.() ?? registry.getAll()) as ModelEntry[];
+  const available = (registry.getAvailable?.() ?? registry.getAll()) as ModelEntry[];
+  const slashIdx = input.indexOf("/");
+  const namedProvider = slashIdx === -1 ? undefined : input.slice(0, slashIdx);
+  const all = available.filter(m =>
+    (namedProvider === undefined || m.provider.toLowerCase() === namedProvider.toLowerCase())
+    && (provider === undefined || m.provider.toLowerCase() === provider.toLowerCase()),
+  );
   const availableSet = new Set(all.map(m => `${m.provider}/${m.id}`.toLowerCase()));
 
   // 1. Exact match: "provider/modelId" — only if available (has auth)
-  const slashIdx = input.indexOf("/");
-  if (slashIdx !== -1) {
-    const provider = input.slice(0, slashIdx);
+  if (namedProvider !== undefined) {
     const modelId = input.slice(slashIdx + 1);
     if (availableSet.has(input.toLowerCase())) {
-      const found = registry.find(provider, modelId);
+      const found = registry.find(namedProvider, modelId);
       if (found) return found;
     }
   }
@@ -100,16 +107,7 @@ export function resolveModel(
     if (found) return found;
   }
 
-  // 3. Provider fallback: a "provider/modelId" query that didn't match under the
-  // named provider (exact or fuzzy above) retries against all providers. The
-  // named provider is preferred when present; this only kicks in when it isn't,
-  // so the same model from another provider beats falling back to "inherit".
-  if (slashIdx !== -1) {
-    const bare = resolveModel(input.slice(slashIdx + 1), registry);
-    if (typeof bare !== "string") return bare;
-  }
-
-  // 4. No match — list available models
+  // 3. No match — never try another provider for a qualified request.
   const modelList = all
     .map(m => `  ${m.provider}/${m.id}`)
     .sort()

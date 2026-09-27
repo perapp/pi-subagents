@@ -239,7 +239,7 @@ Spawns one subagent and resolves to its final text — or, with `schema`, to a v
 | `label` | string | Display name in the progress tree. Also the handle `resume` addresses |
 | `phase` | string | Put this agent in a named group, overriding the ambient `phase()`. **Use it inside `pipeline`/`parallel` stages**, where the ambient phase races |
 | `agentType` | string | Which agent definition to use. Defaults to `general-purpose`; built-ins are `general-purpose`, `Explore`, `Plan`, plus your custom agents |
-| `model` | string | `provider/modelId`, or fuzzy like `haiku` |
+| `model` | string | Overrides the agent definition's default. `provider/modelId` stays on that provider and fails if unavailable; a bare fuzzy name can match any available provider. Omit to use a same-provider file default or inherit the parent |
 | `effort` | string | `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Omitted, the agent definition's own `thinking` decides, then the parent's |
 | `isolation` | `"worktree"` | Run in a throwaway git worktree. Only when agents write files in parallel and would collide — it costs setup time and disk per agent |
 | `gate` | string | A shell command run after the agent finishes; a non-zero exit fails the agent and its output becomes the error |

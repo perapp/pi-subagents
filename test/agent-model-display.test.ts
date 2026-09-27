@@ -232,7 +232,7 @@ describe("Agent tool result — effective model", () => {
     expect(result.details.tags).toContain("thinking: low (asked max)");
   });
 
-  it("discloses a model an agent file pinned over the caller's (#182)", async () => {
+  it("honors a caller model over an agent-file default", async () => {
     pinnedAgent("model: anthropic/claude-haiku-4-5\n");
     const tool = agentTool();
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}) as never);
@@ -251,7 +251,26 @@ describe("Agent tool result — effective model", () => {
       ctx(),
     );
 
-    expect(result.details.modelName).toBe("haiku 4.5 (asked anthropic/claude-opus-4-6)");
+    expect(result.details.modelName).toBe("opus 4.6");
+  });
+
+  it("inherits the parent rather than a cross-provider agent-file default", async () => {
+    pinnedAgent("model: anthropic/claude-haiku-4-5\n");
+    const tool = agentTool();
+    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}) as never);
+    const context = ctx();
+    context.model = { provider: "openai", id: "gpt-4o", name: "GPT-4o" };
+
+    const result = await tool.execute(
+      "tc-5-parent",
+      { prompt: "go", description: "d", subagent_type: "pinned", run_in_background: true },
+      undefined,
+      undefined,
+      context,
+    );
+
+    expect(result.details.modelName).toBe("gpt-4o");
+    expect(vi.mocked(runAgent).mock.calls.at(-1)?.[3]).toMatchObject({ model: context.model });
   });
 
   it("stays quiet when the caller's spelling names the model that won", async () => {
@@ -273,11 +292,12 @@ describe("Agent tool result — effective model", () => {
     expect(result.details.modelName).toBe("haiku 4.5");
   });
 
-  it("discloses a spelling that names no available model at all", async () => {
+  it("refuses an unavailable caller model instead of falling back to the agent file", async () => {
     pinnedAgent("model: anthropic/claude-haiku-4-5\n");
     const tool = agentTool();
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}) as never);
 
+    const callsBefore = vi.mocked(runAgent).mock.calls.length;
     const result = await tool.execute(
       "tc-5c",
       { prompt: "go", description: "d", subagent_type: "pinned", model: "gpt-9", run_in_background: true },
@@ -286,7 +306,8 @@ describe("Agent tool result — effective model", () => {
       ctx(),
     );
 
-    expect(result.details.modelName).toBe("haiku 4.5 (asked gpt-9)");
+    expect(result.content[0]?.text).toContain('Model not found: "gpt-9"');
+    expect(vi.mocked(runAgent).mock.calls).toHaveLength(callsBefore);
   });
 
   it("says nothing about a request that was honored", async () => {

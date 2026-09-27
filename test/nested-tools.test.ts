@@ -207,6 +207,23 @@ describe("child-safe nested Agent tools", () => {
     expect(inScope.isError).toBe(false);
   });
 
+  it("inherits a nested parent's provider instead of a cross-provider agent-file default", async () => {
+    writeAgent("scout", "model: anthropic/allowed\n");
+    const [agent] = tools();
+    const executionCtx = ctx();
+    executionCtx.model = { provider: "openai", id: "gpt-4o" };
+    executionCtx.modelRegistry.getAvailable = () => [
+      { provider: "openai", id: "gpt-4o" }, { provider: "anthropic", id: "allowed" },
+    ];
+
+    const result = await agent.execute("call-1", {
+      subagent_type: "scout", description: "find files", prompt: "Find them",
+    } as any, undefined, undefined, executionCtx);
+
+    expect(result.isError).toBe(false);
+    expect(spawnAndWait.mock.calls[0]?.[4].model).toEqual(executionCtx.model);
+  });
+
   it("queues a steer for an owned child whose session is not ready yet", async () => {
     const [, , steer] = tools();
     const record: Record<string, unknown> = {

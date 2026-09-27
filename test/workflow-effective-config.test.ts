@@ -134,11 +134,8 @@ describe("the workflow host reports a child's effective configuration", () => {
     expect(reported[0]?.requestedThinking).toBe("max");
   });
 
-  // Why the workflow path never discloses a model override at all: unlike the
-  // Agent tool (`agentConfig?.model ?? params.model`), this path resolves
-  // `request.model ?? config?.model`, so the script outranks the agent file and
-  // therefore always got the model it asked for. Seeding a `requestedModel` here
-  // would describe a precedence that does not exist.
+  // Workflows and Agent calls both honor an explicit model over an agent-file
+  // default, so there is no overridden model request to disclose.
   it("lets the script's model outrank the agent file's, so there is nothing to disclose", async () => {
     const haiku = { provider: "anthropic", id: "claude-haiku-4-5", name: "Haiku 4.5" };
     const opus = { provider: "anthropic", id: "claude-opus-4-6", name: "Opus 4.6" };
@@ -168,6 +165,28 @@ describe("the workflow host reports a child's effective configuration", () => {
     expect(vi.mocked(runAgent).mock.calls[0]?.[3]).toMatchObject({ model: haiku });
     // ...so nothing was overridden, and nothing is disclosed.
     expect(reported[0]?.requestedModel).toBeUndefined();
+  });
+
+  it("inherits its parent model rather than a cross-provider file pin", async () => {
+    const parent = { provider: "openai", id: "gpt-4o", name: "GPT-4o" };
+    const pinned = { provider: "anthropic", id: "claude-haiku-4-5", name: "Haiku 4.5" };
+    registerAgents(new Map([["pinned", { name: "pinned", model: "anthropic/claude-haiku-4-5" } as any]]));
+    childSessionReports({ model: parent });
+    const host = createWorkflowHost({
+      pi,
+      ctx: ctx({
+        model: parent,
+        modelRegistry: {
+          find: vi.fn((provider: string, id: string) => [parent, pinned].find(m => m.provider === provider && m.id === id)),
+          getAvailable: vi.fn(() => [parent, pinned]),
+        },
+      }),
+      manager,
+    });
+
+    await host.spawnAgent(spawnRequest({ agentType: "pinned" }));
+
+    expect(vi.mocked(runAgent).mock.calls[0]?.[3]).toMatchObject({ model: parent });
   });
 
   it("says nothing about a level that was honoured", async () => {
