@@ -120,12 +120,15 @@ When a background agent finishes, pi-subagents sends the user a completion notif
 | When you consume | What happens |
 |---|---|
 | Synchronously, inside your `subagents:completed` handler | The notification is never scheduled. This is the clean path |
-| After an `await`, within 200 ms | Still suppressed. The nudge is held for `NUDGE_HOLD_MS` (`src/index.ts:451`), `consume` cancels the pending timer (`:819`), and there is a re-check at send time (`:474`) |
-| After 200 ms | Too late. The follow-up has fired with `triggerTurn: true` and cost the parent a turn |
+| After an `await`, within 200 ms | Still suppressed. The nudge is held briefly, `consume` cancels the individual pending entry, and group delivery re-checks each record |
+| After 200 ms, while the parent is still busy | Still suppressed. The extension retains the notification until `agent_before_settle` and re-checks consumption before delivery; fully consumed groups are dropped and partially consumed groups include only unread, non-superseded runs |
+| After the notification has been handed to Pi for delivery | Too late to retract it. An idle parent is still notified after the initial hold |
+
+Both individual and grouped notifications use `CompletionNudgeQueue`. Busy-parent delivery uses Pi 0.87.1's final actionable `agent_before_settle` boundary, not `agent_end` or a post-`agent_settled` timer. The former can precede retries and compaction; the latter is too late to guarantee a continuation before a single-shot CLI exits. Completed unread results continue the parent within its active operation. Idle delivery retains the 200 ms hold, and session shutdown discards pending notifications. Workers still running at the boundary are not awaited; join them explicitly when their results are required in a one-shot answer.
 
 Fire-and-forget is the intended use: the reply carries nothing to act on, and the channel sits outside the `subagents:rpc:ping` version handshake on purpose (`src/cross-extension-rpc.ts:190`), so you can send it unconditionally and an older pi-subagents with no handler simply keeps notifying.
 
-Consumption is not terminal. An `@handle` steer un-consumes the record (`src/index.ts:920`) because the agent's reply to that message still needs relaying, and so does a background resume (`src/agent-manager.ts:1135`) because the record is starting a new run.
+Consumption is not terminal. An `@handle` steer un-consumes the record because the agent's reply to that message still needs relaying, and so does a background resume because the record is starting a new run. Accepted resumes invalidate the previous run's pending notification immediately, including when the resume is queued. Group members are pinned to their completed run rather than treating a reused, now-running record as an old completion.
 
 One related thing that lives nowhere else: on every top-level settle, pi-subagents writes a session entry — not an event — via `pi.appendEntry("subagents:record", …)` (`src/index.ts:585`), carrying `id`, `type`, `description`, `status`, `result`, `error`, `startedAt` and `completedAt`. It exists for cross-extension history reconstruction. It is append-only history, not something to react to.
 

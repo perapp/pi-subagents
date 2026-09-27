@@ -49,7 +49,7 @@ Or load directly for development:
 pi -e ./src/index.ts
 ```
 
-Requires pi **0.84.0 or newer**: the [`SubagentWorkflow`](#subagentworkflow) tool builds on `constrainedSampling` (pi 0.82.0) and pi-tui's `stripTerminalSequences` (0.84.0). The `peerDependencies` range declares it, so npm flags an older pi at install time.
+Requires pi **0.87.1 or newer**. Completion notifications use the actionable `agent_before_settle` hook so unread results can continue the parent before print/JSON mode exits. The `peerDependencies` range declares this minimum; upgrade pi before installing on an older host.
 
 ### Other hosts
 
@@ -467,6 +467,8 @@ Check status and retrieve results from a background agent.
 | `wait` | boolean | no | Wait for completion |
 | `verbose` | boolean | no | Include full conversation log |
 
+Retrieving a finished result marks it consumed. Individual and grouped completion notifications held while the parent is working are filtered at delivery, so a result retrieved during that run does not produce a redundant follow-up after the final answer.
+
 Cancelling a `wait: true` call (for example, with `Esc`) stops only the wait. The background agent keeps running, and its completion notification still arrives normally.
 
 ### `steer_subagent`
@@ -574,6 +576,12 @@ Nested children and a [workflow](#subagentworkflow)'s agents are outside the poo
 
 When background agents complete, they notify the main agent. The **join mode** controls how these notifications are delivered. It applies only to background agents.
 
+While the parent is busy, notifications stay retractable inside the extension until its final actionable `agent_before_settle` boundary, after retries, compaction and queued continuations. Already-consumed results and superseded runs are omitted; fully consumed groups produce no notification. Unread completed results continue the parent before print/JSON mode exits. An idle parent retains the short 200 ms notification hold. Pending notifications are discarded on session shutdown.
+
+This does not keep a one-shot CLI process alive for workers still running when the parent finishes. Use `run_in_background: false` or `get_subagent_result({ wait: true })` when the answer must include their results.
+
+Idle delivery uses Pi's ordinary follow-up API. A completion can still arrive during a slow, asynchronous session-navigation request before shutdown is confirmed; Pi provides no post-veto hook that would let the extension suppress that interval without risking permanently paused notifications.
+
 | Mode | Behavior |
 |------|----------|
 | `smart` (default) | 2+ background agents spawned in the same turn are auto-grouped into a single consolidated notification. Solo agents notify individually. |
@@ -637,7 +645,7 @@ Runtime tuning values set via `/agents` → Settings (max concurrency, max foreg
 
 **Report usage to session** (`reportUsage`, default `false`): whether subagent spend is added to *this* session's own totals. Subagents run in their own pi sessions, so by default pi's footer, statusline and `/cost` count only what the main model spent — a session that delegated most of its work reads as nearly free. Turn it on and each `Agent` / `get_subagent_result` / `steer_subagent` result carries the spend accumulated since the last one, which pi folds into `getSessionStats()`; `/cost` attributes it to the **Tools/summaries** bucket. Toggle via `/agents → Settings → Report usage to session`; applied live.
 
-Three things worth knowing about the numbers. Every token component is reported, `cacheRead` included — the cached prefix genuinely is re-read and re-billed on every call, and pi counts it the same way for the session's own messages, so withholding it would make a subagent's rows count differently from every other row in one total. (The extension's *own* token displays still leave it out, which is a different question: there it inflates a reading of how much work was done.) Cost is pi's own per-message figure, priced from the model's listed rates; a model pi has no rates for contributes zero rather than an estimate. And the context-window percentage is untouched: pi derives it from assistant messages alone, so a delegating session's context doesn't appear to fill up faster. Agents that finish in the background have no tool result of their own to ride on, so their spend is carried by the next one you make — the footer catches up on the following call, not the moment they finish.
+Three things worth knowing about the numbers. Every token component is reported, `cacheRead` included — the cached prefix genuinely is re-read and re-billed on every call, and pi counts it the same way for the session's own messages, so withholding it would make a subagent's rows count differently from every other row in one total. (The extension's *own* token displays still leave it out, which is a different question: there it inflates a reading of how much work was done.) Cost is pi's own per-message figure, priced from the model's listed rates; a model pi has no rates for contributes zero rather than an estimate. The reported child usage does not inflate the parent's context-window percentage: the tool-result text contributes to that context normally, but tokens spent inside a child do not. Agents that finish in the background have no tool result of their own to ride on, so their spend is carried by the next one you make — the footer catches up on the following call, not the moment they finish.
 
 **Show cost** (`showCost`, default `false`): whether the subagent surfaces print an estimated cost beside their token counts — the widget (running *and* finished lines), [FleetView](#fleetview), the conversation viewer, foreground results, `get_subagent_result`, and completion notifications:
 
@@ -827,6 +835,8 @@ pi.events.emit("subagents:rpc:consume", { requestId: crypto.randomUUID(), agentI
 
 This is the bus-side half of what `get_subagent_result` does when it returns a result. A caller that joins an agent on `subagents:completed` and reports the result itself should consume it — otherwise the notification lands after the parent has already answered, costing a turn to dismiss. Fire-and-forget is the intended use: the reply carries nothing to act on, and the channel is outside the `subagents:rpc:ping` version handshake, so a caller can send it unconditionally and an older extension that has no handler simply keeps notifying. Consuming a running or unknown agent is refused (`success: false`) and changes nothing — a running agent has no result to have been read, and its notification is still the caller's only signal that it finished.
 
+Consumption remains effective while the notification is held during an active parent run, even after the initial 200 ms window. Once a notification is handed to Pi for delivery, it cannot be retracted.
+
 Reply channels are scoped per `requestId`, so concurrent requests don't interfere.
 
 ## Persistent Agent Memory
@@ -953,6 +963,7 @@ src/
   child-context.ts    # AsyncLocalStorage flag marking work done for a child session
   abortable.ts        # Race a wait against Esc without cancelling the background child
   group-join.ts       # Group join manager: batched completion notifications with timeout
+  completion-nudge-queue.ts # Retractable completions at the final actionable parent boundary
   status-note.ts      # Honest status note + salvaged partial output for non-normal outcomes
   usage.ts            # Token usage shapes, accumulators, session-stats readers
 
