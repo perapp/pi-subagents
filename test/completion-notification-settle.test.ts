@@ -108,6 +108,24 @@ describe("individual AND grouped completion delivery", () => {
     expect(settledEntries).toEqual([]);
   });
 
+  it("re-checks individual consumption at delivery even if cancellation was missed", async () => {
+    const id = await spawn();
+    finish[0]();
+    await drain();
+    await advance(3000);
+    // Simulate a missed eager cancellation: the delivery-time check must still
+    // exclude a result consumed while the parent was busy.
+    const cancel = vi.spyOn(CompletionNudgeQueue.prototype, "cancel").mockImplementation(() => {});
+    try {
+      expect(textOf(await consume(id))).toContain("CHILD_RESULT");
+    } finally {
+      cancel.mockRestore();
+    }
+    await settle();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(settledEntries).toEqual([]);
+  });
+
   it("accepts a handle when consuming a parked individual result", async () => {
     const id = await spawn("notification-test");
     finish[0]();
